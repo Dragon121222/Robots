@@ -1,0 +1,165 @@
+\documentclass[11pt,letterpaper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{mathtools}
+\usepackage{array}     % for column customization
+\usepackage{tabularx}  % for stretchable tables
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+
+\newcommand{\kfill}{\hrule height 1pt}
+
+\title{The Mathematical Theory of Embodied Agentic AI}
+\author{Daniel Drake}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Symbols}
+\kfill
+.\\
+Let the following hold:
+\begin{itemize}
+    \item $\mathbb{N}_K = \{1,2,3,...,K\}$
+    \item $\mathbb{N}_K^0 = \{0\} \cup \mathbb{N}_K$
+    \item $T \subseteq \mathbb{R}$
+    \item $card(T) = N \in \mathbb{N}$
+    \item $T = \{t_0,t_1,...,t_f\}$ where $(\forall j \in \mathbb{N}_{N-1}^0) (t_j < t_{j+1})$
+    \item $T$ represent the times at which different events happen.
+    \item $T_K = \{t_0,t_1,...,t_K\} \subseteq T$ represents the first K events.
+\end{itemize}
+\subsection{Sensors}
+\kfill
+.\\
+\noindent Let the following hold:
+\begin{itemize}
+    \item $X = \prod_{j \in \mathbb{N}_K} X_j$ such that $(\forall j \in \mathbb{N}_K) (X_j \text{ is a TVS})$ 
+    \item $(\forall x \in X)(x = (x_1,...,x_K))$
+    \item $\pi_j : X \to X_j \pitchfork \pi_j(x) = x_j$
+    \item $mem(type(x)) = \sum_{j \in \mathbb{N}_K} mem(type(\pi_j(x)))$
+    \item $S$ represent a sensor.
+    \item $S : T \to X$ 
+    \item $D = S(T)$ represents all the data collected by the sensor.
+    \item $D_k = S(T_k)$ represents the first k captures of the sensor. 
+\end{itemize}
+\subsubsection{Proposition}
+\kfill
+.\\
+Given a finite amount of information, we can only draw a finite number of possible conclusions from it. 
+\begin{table}[h]
+\centering
+\caption{16 Fundamental operations}
+\begin{tabular}{c c c c c}
+\toprule
+A                      & 0 & 1 & 0 & 1 \\
+B                      & 0 & 0 & 1 & 1 \\
+\midrule
+False                  & 0 & 0 & 0 & 0 \\
+A AND B                & 0 & 0 & 0 & 1 \\
+$A \not \Leftarrow B$  & 0 & 0 & 1 & 0 \\
+B                      & 0 & 0 & 1 & 1 \\
+$A \not \Rightarrow B$ & 0 & 1 & 0 & 0 \\
+A                      & 0 & 1 & 0 & 1 \\
+A XOR B                & 0 & 1 & 1 & 0 \\
+A OR B                 & 0 & 1 & 1 & 1 \\
+A NOR B                & 1 & 0 & 0 & 0 \\
+A Equivalent B         & 1 & 0 & 0 & 1 \\
+Not A                  & 1 & 0 & 1 & 0 \\
+$A \Rightarrow B$      & 1 & 0 & 1 & 1 \\
+Not B                  & 1 & 1 & 0 & 0 \\
+$A \Leftarrow B$       & 1 & 1 & 0 & 1 \\
+A NAND B               & 1 & 1 & 1 & 0 \\
+True                   & 1 & 1 & 1 & 1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+If we had two variables each of which can store 1 bit of information. 
+Then there are $16$ possible manipulations of these variables and no more. 
+It takes 4 bits of information to represent the operator associated with any of these manipulations. 
+We are left with a problem: 
+    Since we can know all of these operators: 
+        How do we figure out which operators are useful?
+
+In robotics we have this problem. 
+We have sensor input and we need to transform that sensor input into packets of usable information. 
+We often have high dimensional data with is to complicated to deal with on it's own.
+From this we need to find ways to effectively go from the high dimensional data to a low dimensional data 
+which is easier to deal with. 
+
+In addition to this we have another problem. 
+    A single frame of high dimensional data might not be enough information to appropriatly deal with that frame of data.
+    We might need previous frames to come to the correct conclusion about the current frame. 
+\newpage
+\noindent A \textbf{Goal} is a function on which to optimize. \\
+A \textbf{Strategy} is a solution to that optimization problem. \\
+An \textbf{Implementation} is the collection of details on which the strategy is implemented. \\
+A \textbf{Context} is the collection of details around a \{Goal, Strategy, Implementation\} problem.\\\\
+\textbf{Example}:
+\begin{itemize}
+    \item $W,H \in \mathbb{N}$
+    \item $I = [0,1]^{WxH}$
+    \item $(x,y,z \in I)(x \not = z)$
+    \item $f_z : I \rightarrow \mathbb{R}$
+    \item $(\forall y \in I)(f_z(y)=||y-z||)$
+    \item $M \in \mathbb{N}$
+    \item Goal: Find any path: $\{x_t\}_{t\in\mathbb{N}_M^0}$ such that: as $t$ goes from $0 \rightarrow M$, $x_t$ goes from $x \rightarrow z$
+    \item Strategy: \\
+          $x_t = (\frac{t}{M}*z) + ((1-\frac{t}{M})*x)$ \\
+          $f_z(x_0) = ||(\frac{0}{M}*z) + (1-\frac{0}{M})*x - z|| = ||x-z||$ \\
+          $f_z(x_M) = ||(\frac{M}{M}*z) + (1-\frac{M}{M})*x|| = ||z-z|| = ||0|| = 0$
+    \item Implementation:
+        \begin{algorithmic}
+        \State \texttt{size\_t} $t$ \Comment{Loop counter}
+        \For{$t = 0$ \textbf{to} $M$}
+            \State $x_t = \frac{t}{M} z + \left(1-\frac{t}{M}\right) x$
+        \EndFor
+        \end{algorithmic}
+        \end{itemize}
+        \newpage
+        \textbf{Goals:}:
+        \begin{itemize}
+            \item Find an operator $T$ which creates value in an economic system. 
+            \item Find an operator $T$ which turns a sequence of images $x_t$ into a 3d point cloud with identifications of the objects in the point clouds.
+            \item Find an operator $T$ which turns a sequence of images $x_t$ into a the 6 dof localization of the camera. Roll, Pitch, Yaw, X, Y, Z.
+            \item Find an operator $T$ which turns a sequence of images $x_t$ into a collection of sentences generated from words written in the scene. 
+            \item Find an operator $T$ which passively listens for a wakeup word.
+            \item Find an operator $T$ which actively listens for spoken word for a period of time.
+            \item Find an operator $T$ which can turn text into text. 
+            \item Find an operator $T$ which can turn text into sounds. 
+            \item Find an operator $T$ which can turn the general neural network activity into sounds. 
+            \item Find an operator $T$ which can generate new GSI problems involving 3d point clouds.
+            \item Find an operator $T$ which can create the semblance of moods.
+            \item Find an operator $T$ which tries to engage in natural conversation.
+            \item Find an operator $T$ which tries to teach the droid language.
+            \item Find an operator $T$ which can coordinate and direct which goals get executed.
+            \item Find an operator $T$ which tries to translate verbal instruction into a GSI problem.
+            \item Find an operator $T$ which executes artifical general intelligence.
+            \item Find an operator $T$ which executes free will. 
+            \item Find an operator $T$ which documents a GSI problems into UML. 
+            \item Find an operator $T$ which allows the robot to explore and map a space. 
+            \item Find an operator $T$ which allows the robot to climb on surfaces. 
+            \item Find an operator $T$ which will allow the robot to follow another object. 
+            \item Find an operator $T$ which filters a GSI problem through Issac Asimov's laws of robotics. 
+            \item Find an operator $T$ which tune the robot's servos and walking motion through a sensor position solution. 
+            \item Find an operator $T$ which calculates the forward kinematics. 
+            \item Find an operator $T$ which calculates the inverse kinematics. 
+            \item Find an operator $T$ which does laser reflection + camera information analysis. 
+            \item Find an operator $T$ which does a power usage analysis. 
+            \item Find an operator $T$ which recognizes animal behaviors. 
+            \item Find an operator $T$ which allows the robot to dig. 
+            \item Find an operator $T$ which identifies different materials. 
+            \item Find an operator $T$ which can actively try to solve GSI problems. 
+        \end{itemize}
+
+
+
+
+\end{document}
