@@ -17,11 +17,17 @@ from types import MethodType
 #=================================================================
 from remote.common.fakeIpc import FakeIpc as ipcManager
 from remote.camera.simpleCamera import simpleCam as cameraManager
-# from remote.vision.simpleYolo import simpleYolo as yoloManager
 from remote.vision.simpleOrangePiNpuYolo import simpleOrangePiNpuYolo as yoloManager
 from remote.buzzer.droid_sounds import DroidSpeaker as buzzerManager
 from remote.keyboard.keyboardReader import KeyboardReader as keyboardManager
 from remote.servo.servoCommander import ServoCommander as servoManager
+
+from remote.gsi.impl.tofl.goal import GoalImpl
+# from remote.gsi.impl.tofl.context import ContextImpl
+# from remote.gsi.impl.tofl.dataModel import DataModelImpl
+# from remote.gsi.impl.tofl.gsiProblem import GsiProblemImpl
+# from remote.gsi.impl.tofl.implementation import ImplementationImpl
+# from remote.gsi.impl.tofl.strategy import StrategyImpl
 #=================================================================
 
 
@@ -35,14 +41,10 @@ keyboard    = None
 servo       = None
 #=================================================================
 
-
-
 #=================================================================
 def buzzer_receive(self, msg):
     self.say(msg)
 #=================================================================
-
-
 
 #=================================================================
 def camera_receive(self, msg):
@@ -54,51 +56,74 @@ def camera_receive(self, msg):
             print("Camera queue full, dropping frame")
 #=================================================================
 
-
 #=================================================================
 def yolo_receive(self, msg):
+
     detections = self.detect_objects(msg)
-    
     frame_w = msg.shape[1]
     frame_center = frame_w / 2
-    
+    now = time.monotonic()
+
+    if not detections and now - self._last_detection_time > 5.0:
+        if now - self._last_servo_cmd > 2.0:
+            ipc.send("left", "servo")
+            ipc.send("snap_yolo", "camera")
+            self._last_servo_cmd = now
+            return
+
     for det in detections:
-        bbox = det['bbox']
-        bbox_center_x = (bbox[0] + bbox[2]) / 2
 
-        bbox_width = bbox[2] - bbox[0]
-        bbox_height = bbox[3] - bbox[1]
-        bbox_area = bbox_width * bbox_height
+        if now - self._last_detection_time > 5.0:
+            print(f"Detected: {det['class_name']}")
 
-        if bbox_center_x < frame_center - 50:
-            direction = "TURN LEFT"
-            ipc.send("left","servo")
-            time.sleep(1.5)
-        elif bbox_center_x > frame_center + 50:
-            direction = "TURN RIGHT"
-            ipc.send("right","servo")
-            time.sleep(1.5)
-        else:
-            direction = "CENTERED"
-            if bbox_area < 75000:
-                ipc.send("forward","servo")
-                time.sleep(1.5)
-            elif bbox_area > 100000:
-                ipc.send("backwards","servo")
-                time.sleep(1.5)
+            if det['class_name'] == "person":
+                ipc.send("p","buzzer")
+
+            if det['class_name'] == "cat":
+                ipc.send("c","buzzer")
+
+            if det['class_name'] == "dog":
+                ipc.send("d","buzzer")
+
+        if det['class_name'] == "dog" or det['class_name'] == "cat" :
+            bbox = det['bbox']
+            bbox_center_x = (bbox[0] + bbox[2]) / 2
+
+            bbox_width = bbox[2] - bbox[0]
+            bbox_height = bbox[3] - bbox[1]
+            bbox_area = bbox_width * bbox_height
+
+            if bbox_center_x < frame_center - 600:
+                if now - self._last_servo_cmd > 2.0:
+                    direction = "TURN LEFT"
+                    ipc.send("left","servo")
+                    self._last_servo_cmd = now
+            elif bbox_center_x > frame_center + 600:
+                if now - self._last_servo_cmd > 2.0:
+                    direction = "TURN RIGHT"
+                    ipc.send("right","servo")
+                    self._last_servo_cmd = now
             else:
-                ipc.send(det['class_name'],"buzzer")
-                time.sleep(1.5)
+                direction = "CENTERED"
+                if bbox_area < 1000000:
+                    if now - self._last_servo_cmd > 2.0:
+                        ipc.send("forward","servo")
+                        self._last_servo_cmd = now
+                elif bbox_area > 2000000:
+                    if now - self._last_servo_cmd > 2.0:
+                        ipc.send("backwards","servo")
+                        self._last_servo_cmd = now
 
-        print(f"Label \t{det['class_name']}")
-        print(f"\tDirect\t{direction}")
-        print(f"\tCenter\t{bbox_center_x:.0f}")
-        print(f"\tWidth \t{bbox_width:.0f}")
-        print(f"\tHeight\t{bbox_height:.0f}")
-        print(f"\tArea  \t{bbox_area:.0f}")
+            print(f"Label \t{det['class_name']}")
+            print(f"\tDirect\t{direction}")
+            print(f"\tCenter\t{bbox_center_x:.0f}")
+            print(f"\tWidth \t{bbox_width:.0f}")
+            print(f"\tHeight\t{bbox_height:.0f}")
+            print(f"\tArea  \t{bbox_area:.0f}")
 
+        self._last_detection_time = now
     ipc.send("snap_yolo","camera")
-
+#=================================================================
 
 #=================================================================
 def servo_receive(self, msg):
@@ -114,14 +139,10 @@ def servo_receive(self, msg):
         servo.Backward()
 #=================================================================
 
-
-
 #=================================================================
 def keyboard_receive(self, msg):
     print("Received Command")
 #=================================================================
-
-
 
 #=================================================================
 buzzer              = buzzerManager()
@@ -156,7 +177,6 @@ ipc.send("Online","buzzer")
 ipc.send("setup","servo")
 ipc.send("snap_yolo","camera")
 
-# Let the system run indefinitely
 try:
     while True:
         time.sleep(1)

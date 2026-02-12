@@ -3,6 +3,7 @@ import numpy as np
 from rknnlite.api import RKNNLite
 import os
 import sys
+import time
 
 TARGET_CLASSES = {0: "person", 16: "dog", 17: "cat"}
 OBJ_THRESH = 0.45
@@ -11,6 +12,12 @@ IMG_SIZE = (640, 640)
 
 class simpleOrangePiNpuYolo:
     def __init__(self, model_path='yolov5n_rk3588.rknn'):
+        # self._last_seen = {}  # class_name -> timestamp
+        # self._timeout_fired = {}  # class_name -> bool (avoid repeated triggers)
+        # self.LOST_TIMEOUT = 5.0
+        self._last_detection_time = time.monotonic()
+        self._last_servo_cmd = time.monotonic()
+
         # Suppress RKNN C-level warnings
         self._devnull = os.open(os.devnull, os.O_WRONLY)
         self._old_stderr = os.dup(2)

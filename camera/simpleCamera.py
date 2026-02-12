@@ -13,6 +13,11 @@ class simpleCam:
         fps=30,
         fourcc="MJPG",
     ):
+
+        self._last_seen = {}  # class_name -> timestamp
+        self._timeout_fired = {}  # class_name -> bool (avoid repeated triggers)
+        self.LOST_TIMEOUT = 5.0
+
         print("CTOR Simple Camera")
         self.device = device
         self.width = width
