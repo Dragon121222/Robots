@@ -1,6 +1,12 @@
 import threading
 import queue
 
+class FakeIpcMessage:
+    def __init__(self, msg, listenerId, senderId):
+        self._msg = msg
+        self._listenerId = listenerId
+        self._senderId = senderId 
+
 class FakeIpc:
     def __init__(self, listeners: dict, queue_size=1):
         self.listenerList = listeners
@@ -27,10 +33,10 @@ class FakeIpc:
             finally:
                 q.task_done()
 
-    def send(self, msg, listener_name):
-        q = self.queues.get(listener_name)
+    def send(self, msg: FakeIpcMessage):
+        q = self.queues.get(msg._listenerId)
         if q is None:
-            raise KeyError(f"No listener named '{listener_name}'")
+            raise KeyError(f"No listener named '{msg._listenerId}'")
 
         q.put(msg)   # blocks if queue full (backpressure)
 
