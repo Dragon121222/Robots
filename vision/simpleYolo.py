@@ -25,6 +25,9 @@ class simpleYolo:
         print("✓ YOLO loaded")
 
     def detect_objects(self, frame):
+
+
+
         """
         Detect objects in a single frame.
         Returns a list of dicts:
@@ -56,6 +59,7 @@ class simpleYolo:
                     'confidence': conf,
                     'bbox': bbox
                 })
+        self._processing = False
         return detections
 
     @staticmethod

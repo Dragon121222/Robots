@@ -12,6 +12,8 @@ IMG_SIZE = (640, 640)
 
 class simpleOrangePiNpuYolo:
     def __init__(self, model_path='yolov5n_rk3588.rknn'):
+        self._processing = False
+
         # self._last_seen = {}  # class_name -> timestamp
         # self._timeout_fired = {}  # class_name -> bool (avoid repeated triggers)
         # self.LOST_TIMEOUT = 5.0
@@ -71,6 +73,7 @@ class simpleOrangePiNpuYolo:
         return img_padded
 
     def detect_objects(self, frame):
+        self._processing = True
         # Suppress only during inference
         os.dup2(self._devnull, 2)
         
@@ -82,7 +85,8 @@ class simpleOrangePiNpuYolo:
         
         # Restore immediately
         os.dup2(self._old_stderr, 2)
-        
+
+        self._processing = False
         if outputs is None:
             return []
         

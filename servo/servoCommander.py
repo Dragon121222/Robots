@@ -53,6 +53,8 @@ class ServoCommander:
         self.base_foot_bl=MakeServoChannel(6)
         self.base_foot_br=MakeServoChannel(9)
 
+        self.yaw_accumulator = 0
+
 #========================================================#
 # Base Write                                             #
 #========================================================#
@@ -314,11 +316,45 @@ class ServoCommander:
         if dir=="Right":
             self.RollRight()
 
+    def Yaw(self,dir):
+        if dir=="left":
+            self.YawLeft()
+        if dir=="Right":
+            self.YawRight()
+
     def RollLeft(self):
         print("Roll Left!")
 
     def RollRight(self):
         print("Roll Right")
+
+    def YawLeft(self):
+        print("Yaw Left Accumulate")
+        self.yaw_accumulator = self.yaw_accumulator + 1
+        if self.yaw_accumulator < 10:
+            self.DelayHipFLFRBLBR(
+                self.hip_f*self.yaw_accumulator/10,
+                self.hip_b*self.yaw_accumulator/10,
+                self.hip_f*self.yaw_accumulator/10,
+                self.hip_b*self.yaw_accumulator/10
+            )
+        else: 
+            self.yaw_accumulator = 0
+            self.Rotate("left")
+
+    def YawRight(self):
+        print("Yaw Right Accumulate")
+        self.yaw_accumulator = self.yaw_accumulator - 1
+        if self.yaw_accumulator > -10:
+            self.DelayHipFLFRBLBR(
+                self.hip_f*self.yaw_accumulator/10,
+                self.hip_b*self.yaw_accumulator/10,
+                self.hip_f*self.yaw_accumulator/10,
+                self.hip_b*self.yaw_accumulator/10
+            )
+        else: 
+            self.yaw_accumulator = 0
+            self.Rotate("right")
 
     def PanUp(self):
         print("Pan up!")
