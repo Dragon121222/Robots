@@ -24,8 +24,11 @@ from remote.vision.simpleOrangePiNpuYolo import simpleOrangePiNpuYolo as yoloMan
 from remote.buzzer.droid_sounds import DroidSpeaker as buzzerManager
 from remote.keyboard.keyboardReader import KeyboardReader as keyboardManager
 from remote.servo.servoCommander import ServoCommander as servoManager
+from remote.stt.simpleStt import SimpleStt as sttManager
 #=================================================================
 
+#=================================================================
+# The Boyz
 #=================================================================
 ipc         = None
 buzzer      = None
@@ -33,6 +36,40 @@ camera      = None
 yolo        = None
 keyboard    = None
 servo       = None
+stt         = None
+#=================================================================
+
+#=================================================================
+idle_st     = fsmState("Idle")
+active_st   = fsmState("Active")
+
+sttStateMachine: dict[str, set[str]] = {
+    idle_st._stateId:       {idle_st._stateId, active_st._stateId},
+    active_st._stateId:     {idle_st._stateId, active_st._stateId}
+}
+
+def sttFsm_receive(self, ipcMsg: ipcMessage):
+    self.requestUpdate(ipcMsg._msg, ipcMsg._senderId)
+
+def stt_receive(self, ipcMsg: ipcMessage):
+    print(f"STT: received command '{ipcMsg._msg}'")
+
+# Wire the callbacks to IPC
+def stt_on_wake():
+    print("Waking up!")
+    ipc.send(ipcMessage("!", "buzzer", "stt"))
+    ipc.send(ipcMessage(active_st, "sttFsm", "stt"))
+
+def stt_on_speech(text):
+    print(f"STT heard: {text}")
+    ipc.send(ipcMessage(text, "buzzer", "stt"))
+    ipc.send(ipcMessage(idle_st, "sttFsm", "stt"))
+
+    if text == "dance":
+        ipc.send(ipcMessage("Dance","servo","stt"))
+
+    # Future: route to strategic layer
+    # ipc.send(ipcMessage(text, "strategic", "stt"))
 #=================================================================
 
 #=================================================================
@@ -98,20 +135,18 @@ def yolo_receive(self, ipcMsg: ipcMessage):
     now = time.monotonic()
 
     if self._processing == True: # Just fucking drop it.
-# ipc.send(ipcMessage("snap","camera","yolo"))
         return
 
-    print("Frame")
+    if self._debug == True:
+        if ipcMsg._previous_now != None:
+            print(f"Message Received @ {now} : Delta : {now - ipcMsg._previous_now} : 1 / Delta {1/(now - ipcMsg._previous_now)}")
 
-    if ipcMsg._previous_now != None:
-        print(f"Message Received @ {now} : Delta : {now - ipcMsg._previous_now} : 1 / Delta {1/(now - ipcMsg._previous_now)}")
     ipcMsg._previous_now = now
     detections = self.detect_objects(ipcMsg._msg)
     after_detect_now = time.monotonic()
 
-
-
-    print(f"Finished detecting at @ {after_detect_now} : Delta : {after_detect_now - ipcMsg._previous_now} : 1 / Delta {1/(after_detect_now - ipcMsg._previous_now)}")
+    if self._debug == True:
+        print(f"Finished detecting at @ {after_detect_now} : Delta : {after_detect_now - ipcMsg._previous_now} : 1 / Delta {1/(after_detect_now - ipcMsg._previous_now)}")
 
     frame_w = ipcMsg._msg.shape[1]
     frame_center = frame_w / 2
@@ -119,7 +154,7 @@ def yolo_receive(self, ipcMsg: ipcMessage):
     if not detections and now - self._last_detection_time > 5.0:
         if now - self._last_servo_cmd > 2.0:
             ipc.send(ipcMessage("left","servo","yolo"))
-            ipc.send(ipcMessage("snap","camera","yolo"))
+            # ipc.send(ipcMessage("snap","camera","yolo"))
             self._last_servo_cmd = now
             return
 
@@ -127,7 +162,8 @@ def yolo_receive(self, ipcMsg: ipcMessage):
 
     for det in detections:
         if now - self._last_detection_time > 5.0:
-            print(f"Detected: {det['class_name']}")
+            if self._debug == True:
+                print(f"Detected: {det['class_name']}")
             if det['class_name'] == "person":
                 ipc.send(ipcMessage("p","buzzer","yolo"))
             if det['class_name'] == "cat":
@@ -163,42 +199,51 @@ def yolo_receive(self, ipcMsg: ipcMessage):
             #             ipc.send(ipcMessage("backwards","servo","yolo"))
             #             self._last_servo_cmd = now
 
-            print(f"Label \t{det['class_name']}")
-            print(f"\tDirect\t{direction}")
-            print(f"\tCenter\t{bbox_center_x:.0f}")
-            print(f"\tWidth \t{bbox_width:.0f}")
-            print(f"\tHeight\t{bbox_height:.0f}")
-            print(f"\tArea  \t{bbox_area:.0f}")
+            if self._debug == True:
+                print(f"Label \t{det['class_name']}")
+                print(f"\tDirect\t{direction}")
+                print(f"\tCenter\t{bbox_center_x:.0f}")
+                print(f"\tWidth \t{bbox_width:.0f}")
+                print(f"\tHeight\t{bbox_height:.0f}")
+                print(f"\tArea  \t{bbox_area:.0f}")
 
         self._last_detection_time = now
-    ipc.send(ipcMessage("snap","camera","yolo"))
+    # ipc.send(ipcMessage("snap","camera","yolo"))
 #=================================================================
 
 #=================================================================
 normal_ss   = fsmState("Normal")
 fast_ss     = fsmState("Fast")
+dance_ss    = fsmState("Dance")
 
 servoStateMachine: dict[str, set[str]] = {
-    normal_ss._stateId:     {normal_ss._stateId, fast_ss._stateId},
-    fast_ss._stateId:       {normal_ss._stateId, fast_ss._stateId}
+    normal_ss._stateId:     {normal_ss._stateId, fast_ss._stateId, dance_ss._stateId},
+    fast_ss._stateId:       {normal_ss._stateId, fast_ss._stateId, dance_ss._stateId},
+    dance_ss._stateId:      {normal_ss._stateId, dance_ss._stateId, dance_ss._stateId}
 }
 
 def servoFsm_receive(self, ipcMsg: ipcMessage):
     self.requestUpdate(ipcMsg._msg,ipcMsg._senderId)
 
 def servo_receive(self, ipcMsg: ipcMessage):
-    if ipcMsg._msg == "setup":
+    if self.fsm._currentState._stateId == "Normal":
+        if ipcMsg._msg == "setup":
+            servo.SetupWalk()
+        if ipcMsg._msg == "left":
+            # servo.RotateLeft()
+            servo.YawLeft()
+        if ipcMsg._msg == "right":
+            # servo.RotateRight()
+            servo.YawRight()
+        if ipcMsg._msg == "forward":
+            servo.Forward()
+        if ipcMsg._msg == "backward":
+            servo.Backward()
+    elif self.fsm._currentState._stateId == "Dance":
+        servo.Dance()
+        time.sleep(5)
         servo.SetupWalk()
-    if ipcMsg._msg == "left":
-        # servo.RotateLeft()
-        servo.YawLeft()
-    if ipcMsg._msg == "right":
-        # servo.RotateRight()
-        servo.YawRight()
-    if ipcMsg._msg == "forward":
-        servo.Forward()
-    if ipcMsg._msg == "backward":
-        servo.Backward()
+        self.fsm = "Normal"
 #=================================================================
 
 #=================================================================
@@ -240,6 +285,15 @@ def ipcFsm_receive(self, ipcMsg: ipcMessage):
 #=================================================================
 
 #=================================================================
+stt                     = sttManager()
+stt.fsm                 = fsmManager(sttStateMachine, idle_st)
+stt.fsm.stt             = stt
+
+stt.fsm.receive         = MethodType(sttFsm_receive, stt.fsm)
+stt.receive             = MethodType(stt_receive, stt)
+stt._on_wake = stt_on_wake
+stt._on_speech = stt_on_speech
+
 buzzer                  = buzzerManager()
 buzzer.fsm              = fsmManager(buzzerStateMachine,    normal_bs)
 buzzer.fsm.buzzer       = buzzer
@@ -281,6 +335,8 @@ keyboard.receive        = MethodType(keyboard_receive,      keyboard)
 keyboard.callback       = keyboard.receive
 
 listenerList = {
+    "stt":          stt,
+    "sttFsm":       stt.fsm,
     "buzzer":       buzzer,
     "buzzerFsm":    buzzer.fsm,
     "camera":       camera,

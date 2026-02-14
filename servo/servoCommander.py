@@ -446,6 +446,8 @@ class ServoCommander:
         self.DelayFootBR(self.foot_n)
         self.DelayHipFLFRBLBR(0,0,0,0)
         
+    def Dance(self):
+        self.Sit()
 
     def Sit(self):
         current_hfl=self.base_hip_fl_value

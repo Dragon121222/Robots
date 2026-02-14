@@ -13,6 +13,7 @@ IMG_SIZE = (640, 640)
 class simpleOrangePiNpuYolo:
     def __init__(self, model_path='yolov5n_rk3588.rknn'):
         self._processing = False
+        self._debug = False
 
         # self._last_seen = {}  # class_name -> timestamp
         # self._timeout_fired = {}  # class_name -> bool (avoid repeated triggers)
