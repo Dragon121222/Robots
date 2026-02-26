@@ -15,17 +15,17 @@ from types import MethodType
 #=================================================================
 # Custom Ecosystem
 #=================================================================
-from remote.common.fakeIpc import FakeIpc as ipcManager
-from remote.common.fakeIpc import FakeIpcMessage as ipcMessage
-from remote.common.simpleFsm import SimpleState as fsmState
-from remote.common.simpleFsm import SimpleFsm as fsmManager
-from remote.camera.simpleCamera import simpleCam as cameraManager
-from remote.vision.simpleOrangePiNpuYolo import simpleOrangePiNpuYolo as yoloManager
-from remote.buzzer.droid_sounds import DroidSpeaker as buzzerManager
-from remote.keyboard.keyboardReader import KeyboardReader as keyboardManager
-from remote.servo.servoCommander import ServoCommander as servoManager
-from remote.stt.simpleStt import SimpleStt as sttManager
-#=================================================================
+from playground.remote.common.fakeIpc import FakeIpc as ipcManager
+from playground.remote.common.fakeIpc import FakeIpcMessage as ipcMessage
+from playground.remote.common.simpleFsm import SimpleState as fsmState
+from playground.remote.common.simpleFsm import SimpleFsm as fsmManager
+from playground.remote.camera.simpleCamera import simpleCam as cameraManager
+from playground.remote.vision.simpleOrangePiNpuYolo import simpleOrangePiNpuYolo as yoloManager
+from playground.remote.buzzer.droid_sounds import DroidSpeaker as buzzerManager
+from playground.remote.keyboard.keyboardReader import KeyboardReader as keyboardManager
+from playground.remote.servo.servoCommander import ServoCommander as servoManager
+from playground.remote.stt.simpleStt import SimpleStt as sttManager
+#=====================playground.============================================
 
 #=================================================================
 # The Boyz

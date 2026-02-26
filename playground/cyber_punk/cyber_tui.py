@@ -1,0 +1,479 @@
+#!/usr/bin/env python3
+"""
+cyber_tui.py — cyberpunk TUI framework
+Usage:
+
+    app = CyberTUI()
+
+    @app.panel(x=0, y=0, w=0.5, h=0.6, title='MY PANEL')
+    def my_panel(scr, box, state):
+        app.putch(scr, box.y1+1, box.x1+2, 'hello world', app.attr(C_CYAN))
+
+    @app.on_key('r')
+    def refresh(state):
+        state['data'] = fetch_something()
+
+    @app.updater
+    def tick(state):
+        state['counter'] += 1
+
+    app.run()
+
+Coordinates: x, y, w, h can be 0..1 (fraction of terminal) or int (absolute).
+"""
+
+import curses
+import time
+import random
+import subprocess
+import threading
+from dataclasses import dataclass, field
+from typing import Callable
+
+# ── Color pair IDs ─────────────────────────────────────────────────────────────
+C_CYAN    = 1
+C_MAGENTA = 2
+C_GREEN   = 3
+C_YELLOW  = 4
+C_RED     = 5
+C_WHITE   = 6
+C_DIM     = 7
+# Reserve 8-15 for user-defined pairs via app.add_color()
+
+
+@dataclass
+class Box:
+    """Resolved panel geometry (absolute coords)."""
+    x1: int; y1: int; x2: int; y2: int
+
+    @property
+    def w(self): return self.x2 - self.x1
+    @property
+    def h(self): return self.y2 - self.y1
+
+    def inner(self, pad=1):
+        """Return a Box shrunk by pad on all sides (content area inside border)."""
+        return Box(self.x1+pad, self.y1+pad, self.x2-pad, self.y2-pad)
+
+
+@dataclass
+class PanelDef:
+    fn:           Callable
+    x: float;    y: float
+    w: float;    h: float
+    title:        str  = ''
+    border_color: int  = C_DIM
+    title_color:  int  = C_CYAN
+    border:       bool = True
+    scrollable:   bool = False
+    name:         str  = ''     # optional; used as scroll dict key
+
+
+class CyberTUI:
+    """
+    Minimal cyberpunk TUI framework built on curses.
+
+    Extend via:
+      @app.panel(x, y, w, h, ...)  — register a drawing function
+      @app.on_key('x')             — register a keypress handler
+      @app.updater                 — register a per-tick state updater
+      app.state                    — shared dict, put whatever you want in it
+      app.add_color(id, fg, bg)    — define extra 256-color pairs
+    """
+
+    def __init__(self, tick_ms: int = 100):
+        self.tick_ms    = tick_ms
+        self.state      = {}
+        self._panels:   list[PanelDef]        = []
+        self._keys:     dict[int, Callable]   = {}
+        self._updaters: list[Callable]        = []
+        self._extra_colors: list[tuple]       = []
+        self._watchers: list[dict]            = []   # background command runners
+        self._running   = False
+        self._hovered   = -1                         # index of panel under mouse
+        self._scroll:   dict[str, int]        = {}   # per-panel scroll offsets
+        self._scr       = None
+
+    # ── Decorators ─────────────────────────────────────────────────────────────
+
+    def panel(self, x=0, y=0, w=1.0, h=1.0,
+              title='', border=True,
+              border_color=C_DIM, title_color=C_CYAN,
+              scrollable=False, name=''):
+        """
+        Register a panel drawing function.
+
+            @app.panel(x=0, y=0, w=0.5, h=1.0, title='LEFT',
+                       scrollable=True, name='left')
+            def left_panel(scr, box, state, scroll):
+                # scroll is the current scroll offset (int), only present
+                # when scrollable=True. Two-finger swipe updates it automatically.
+                for i, line in enumerate(lines[scroll:scroll+box.inner().h]):
+                    app.putch(scr, box.inner().y1+i, box.inner().x1, line)
+
+        x, y, w, h: float 0..1 = fraction of terminal  |  int = absolute cells
+        name:       optional key for app.scroll_of(name) lookups
+        """
+        def decorator(fn):
+            key = name or fn.__name__
+            self._panels.append(PanelDef(
+                fn=fn, x=x, y=y, w=w, h=h,
+                title=title, border=border,
+                border_color=border_color, title_color=title_color,
+                scrollable=scrollable, name=key,
+            ))
+            if scrollable:
+                self._scroll.setdefault(key, 0)
+            return fn
+        return decorator
+
+    def on_key(self, key):
+        """
+        Register a keypress handler.
+
+            @app.on_key('r')
+            def reload(state): state['data'] = fetch()
+
+            @app.on_key(curses.KEY_DOWN)
+            def scroll(state): state['offset'] += 1
+
+        key: single char str, int (curses constant), or list of either.
+        Handler receives (state).
+        """
+        def decorator(fn):
+            keys = key if isinstance(key, list) else [key]
+            for k in keys:
+                code = ord(k) if isinstance(k, str) else k
+                self._keys[code] = fn
+            return fn
+        return decorator
+
+    def scroll_of(self, name: str) -> int:
+        """Return the current scroll offset for a named scrollable panel."""
+        return self._scroll.get(name, 0)
+
+    def set_scroll(self, name: str, value: int):
+        """Manually set scroll offset for a named panel."""
+        self._scroll[name] = max(0, value)
+
+    @property
+    def updater(self):
+        """
+        Register a per-tick state updater (called every tick before render).
+
+            @app.updater
+            def tick(state): state['t'] += 1
+        """
+        def decorator(fn):
+            self._updaters.append(fn)
+            return fn
+        return decorator
+
+    def watch(self, cmd, state_key, grep=None, interval=300, shell=False):
+        """
+        Run a command in the background, optionally pipe through grep,
+        store output lines in state[state_key]. Re-runs every `interval` seconds.
+        Runs immediately on launch, then repeats.
+
+            app.watch(
+                cmd       = '/path/to/script.sh',
+                state_key = 'my_output',
+                grep      = 'ERROR',        # optional; None = no filter
+                interval  = 300,            # seconds; default 5 min
+                shell     = False,          # True if cmd is a shell string with pipes etc.
+            )
+
+        state[state_key] is always a list of strings (lines).
+        state[state_key + '_ts'] is the last-run timestamp string.
+        state[state_key + '_err'] is stderr if the command failed, else ''.
+        """
+        self.state[state_key]          = ['— waiting for first run —']
+        self.state[state_key + '_ts']  = ''
+        self.state[state_key + '_err'] = ''
+
+        def _run():
+            try:
+                result = subprocess.run(
+                    cmd, shell=shell,
+                    capture_output=True, text=True
+                )
+                lines = result.stdout.splitlines()
+                if grep:
+                    lines = [l for l in lines if grep.lower() in l.lower()]
+                self.state[state_key]          = lines or ['— no output —']
+                self.state[state_key + '_ts']  = time.strftime('%H:%M:%S')
+                self.state[state_key + '_err'] = result.stderr.strip()
+            except Exception as e:
+                self.state[state_key]          = [f'— error: {e} —']
+                self.state[state_key + '_ts']  = time.strftime('%H:%M:%S')
+                self.state[state_key + '_err'] = str(e)
+
+        def _loop():
+            while self._running:
+                _run()
+                # Sleep in small increments so we can exit cleanly
+                for _ in range(interval * 10):
+                    if not self._running: break
+                    time.sleep(0.1)
+
+        self._watchers.append({'loop': _loop})
+
+    # ── Color ──────────────────────────────────────────────────────────────────
+
+    def add_color(self, pair_id: int, fg: int, bg: int = -1):
+        """Define a 256-color pair. Safe to call before or after run()."""
+        self._extra_colors.append((pair_id, fg, bg))
+        if self._scr:
+            curses.init_pair(pair_id, fg, bg)
+
+    def attr(self, pair: int, bold=False, dim=False, reverse=False) -> int:
+        """Build a curses attribute value from a color pair + modifiers."""
+        a = curses.color_pair(pair)
+        if bold:    a |= curses.A_BOLD
+        if dim:     a |= curses.A_DIM
+        if reverse: a |= curses.A_REVERSE
+        return a
+
+    # ── Drawing primitives ─────────────────────────────────────────────────────
+
+    def putch(self, scr, y, x, s, a=0):
+        """Boundary-safe addstr."""
+        H, W = scr.getmaxyx()
+        if y < 0 or y >= H or x < 0 or x >= W: return
+        try:
+            scr.addstr(y, x, str(s)[:W-x], a)
+        except curses.error:
+            pass
+
+    def hline(self, scr, y, x, ch, n, a=0):
+        """Unicode-safe horizontal line."""
+        H, W = scr.getmaxyx()
+        n = min(n, W - x)
+        if n > 0 and 0 <= y < H:
+            self.putch(scr, y, x, ch * n, a)
+
+    def vline(self, scr, y, x, ch, n, a=0):
+        """Vertical line."""
+        H = scr.getmaxyx()[0]
+        for i in range(min(n, H - y)):
+            self.putch(scr, y+i, x, ch, a)
+
+    def draw_box(self, scr, box: Box, title='', border_attr=0, title_attr=0):
+        """Draw a double-line box around a Box region."""
+        y, x, h, w = box.y1, box.x1, box.h, box.w
+        ba = border_attr or self.attr(C_DIM)
+        ta = title_attr  or self.attr(C_CYAN, bold=True)
+        self.putch(scr, y,     x,     '╔', ba)
+        self.putch(scr, y,     x+w-1, '╗', ba)
+        self.putch(scr, y+h-1, x,     '╚', ba)
+        self.putch(scr, y+h-1, x+w-1, '╝', ba)
+        self.hline(scr, y,     x+1, '═', w-2, ba)
+        self.hline(scr, y+h-1, x+1, '═', w-2, ba)
+        self.vline(scr, y+1,   x,   '║', h-2, ba)
+        self.vline(scr, y+1,   x+w-1, '║', h-2, ba)
+        if title:
+            t  = f' {title} '
+            tx = x + max(1, (w - len(t)) // 2)
+            self.putch(scr, y, tx, t, ta)
+
+    def bar(self, scr, y, x, width, pct, color=None, a=0):
+        """Filled progress bar. pct = 0..100."""
+        if color is None:
+            color = C_GREEN if pct < 50 else C_YELLOW if pct < 80 else C_RED
+        filled = max(0, min(width, int(pct / 100 * width)))
+        self.putch(scr, y, x,        '█' * filled,         self.attr(color, bold=True) | a)
+        self.putch(scr, y, x+filled, '░' * (width-filled), self.attr(C_DIM) | a)
+
+    def sparkline(self, scr, y, x, width, data, color=C_CYAN, max_val=None):
+        """8-level block sparkline from any iterable."""
+        blocks = ' ▁▂▃▄▅▆▇█'
+        pts = list(data)[-width:]
+        mv  = max_val or (max(pts, default=1) or 1)
+        line = ''.join(blocks[min(8, int(v / mv * 8))] for v in pts)
+        self.putch(scr, y, x, line.rjust(width), self.attr(color))
+
+    # ── Geometry ───────────────────────────────────────────────────────────────
+
+    def _resolve(self, val, total) -> int:
+        return int(val * total) if isinstance(val, float) else int(val)
+
+    def _resolve_box(self, p: PanelDef, H: int, W: int) -> Box:
+        x1 = self._resolve(p.x, W)
+        y1 = self._resolve(p.y, H)
+        w  = self._resolve(p.w, W)
+        h  = self._resolve(p.h, H)
+        return Box(x1, y1, x1+w, y1+h)
+
+    # ── Internal ───────────────────────────────────────────────────────────────
+
+    def _init_colors(self):
+        curses.start_color()
+        curses.use_default_colors()
+        curses.init_pair(C_CYAN,    51,  -1)
+        curses.init_pair(C_MAGENTA, 201, -1)
+        curses.init_pair(C_GREEN,   118, -1)
+        curses.init_pair(C_YELLOW,  220, -1)
+        curses.init_pair(C_RED,     196, -1)
+        curses.init_pair(C_WHITE,   255, -1)
+        curses.init_pair(C_DIM,     238, -1)
+        for pair_id, fg, bg in self._extra_colors:
+            curses.init_pair(pair_id, fg, bg)
+
+    def _render(self, scr):
+        scr.erase()
+        H, W = scr.getmaxyx()
+        for i, p in enumerate(self._panels):
+            box = self._resolve_box(p, H, W)
+            if p.border:
+                hovering    = (i == self._hovered)
+                border_attr = self.attr(C_CYAN, bold=True) if hovering \
+                              else self.attr(p.border_color)
+                self.draw_box(scr, box,
+                              title=p.title,
+                              border_attr=border_attr,
+                              title_attr=self.attr(p.title_color, bold=True))
+            if p.scrollable:
+                p.fn(scr, box, self.state, self._scroll.get(p.name, 0))
+            else:
+                p.fn(scr, box, self.state)
+        scr.refresh()
+
+    def _handle_input(self, scr) -> bool:
+        scr.timeout(self.tick_ms)
+        key = scr.getch()
+        if key == -1: return True
+        if key in (ord('q'), ord('Q'), 27): return False
+
+        if key == curses.KEY_MOUSE:
+            try:
+                _, mx, my, _, bstate = curses.getmouse()
+                H, W = scr.getmaxyx()
+                self._hovered = -1
+                for i, p in enumerate(self._panels):
+                    box = self._resolve_box(p, H, W)
+                    if box.x1 <= mx < box.x2 and box.y1 <= my < box.y2:
+                        self._hovered = i
+                        # Route scroll wheel to this panel if scrollable
+                        if p.scrollable:
+                            cur = self._scroll.get(p.name, 0)
+                            if bstate & curses.BUTTON4_PRESSED:   # swipe up
+                                self._scroll[p.name] = max(0, cur - 1)
+                            elif bstate & curses.BUTTON5_PRESSED: # swipe down
+                                self._scroll[p.name] = cur + 1
+                        break
+            except curses.error:
+                pass
+            return True
+
+        handler = self._keys.get(key)
+        if handler:
+            handler(self.state)
+        return True
+
+    def _main(self, scr):
+        self._scr     = scr
+        self._running = True
+        self._init_colors()
+        curses.curs_set(0)
+        curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
+
+        # Start all background watchers
+        for w in self._watchers:
+            t = threading.Thread(target=w['loop'], daemon=True)
+            t.start()
+
+        while True:
+            for fn in self._updaters:
+                fn(self.state)
+            self._render(scr)
+            if not self._handle_input(scr):
+                break
+
+    def run(self):
+        try:
+            curses.wrapper(self._main)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            self._running = False
+        print('\033[0m')
+
+
+# ── Demo ───────────────────────────────────────────────────────────────────────
+
+if __name__ == '__main__':
+    app = CyberTUI(tick_ms=100)
+    app.state.update({
+        'bars':   [(f'CH{i}', random.uniform(10, 90)) for i in range(6)],
+        'log':    [f'[{i:03d}] init ok' for i in range(30)],
+        'tick':   0,
+    })
+
+    # ── Background command watcher ─────────────────────────────────────────────
+    app.watch(
+        cmd       = 'ps aux',
+        state_key = 'ps_out',
+        grep      = 'python',
+        interval  = 300,
+    )
+
+    # ── Panels ─────────────────────────────────────────────────────────────────
+
+    @app.panel(x=0, y=0, w=0.55, h=0.55, title='SIGNAL',
+               scrollable=True, name='signal')
+    def panel_bars(scr, box, state, scroll):
+        inner = box.inner()
+        app.sparkline(scr, inner.y1, inner.x1, inner.w,
+                      [v for _, v in state['bars']], color=C_CYAN)
+        for i, (label, val) in enumerate(state['bars'][scroll:]):
+            ry = inner.y1 + 1 + i
+            if ry >= inner.y2: break
+            app.putch(scr, ry, inner.x1, label, app.attr(C_DIM))
+            app.bar(scr, ry, inner.x1+4, inner.w-10, val)
+            app.putch(scr, ry, inner.x2-5, f'{val:5.1f}', app.attr(C_WHITE))
+
+    @app.panel(x=0.55, y=0, w=0.45, h=0.55, title='LOG',
+               title_color=C_MAGENTA, scrollable=True, name='log')
+    def panel_log(scr, box, state, scroll):
+        inner = box.inner()
+        for i, line in enumerate(state['log'][scroll:scroll+inner.h]):
+            app.putch(scr, inner.y1+i, inner.x1, line[:inner.w], app.attr(C_CYAN))
+
+    @app.panel(x=0, y=0.55, w=1.0, h=0.35, title='WATCH // ps aux | grep python',
+               title_color=C_MAGENTA, border_color=C_MAGENTA,
+               scrollable=True, name='watch')
+    def panel_watch(scr, box, state, scroll):
+        inner = box.inner()
+        ts  = state.get('ps_out_ts',  '')
+        err = state.get('ps_out_err', '')
+        meta = f'last run: {ts}' + (f'  ⚠ {err[:40]}' if err else '')
+        app.putch(scr, inner.y1, inner.x1, meta[:inner.w], app.attr(C_DIM))
+        for i, line in enumerate(state.get('ps_out', [])[scroll:scroll+inner.h-1]):
+            app.putch(scr, inner.y1+1+i, inner.x1, line[:inner.w], app.attr(C_GREEN))
+
+    @app.panel(x=0, y=0.9, w=1.0, h=0.1, title='STATUS', border=False)
+    def panel_status(scr, box, state):
+        app.putch(scr, box.y1, box.x1,
+                  f'  tick={state["tick"]}  [q]quit  [r]randomize  '
+                  f'↕ two-finger swipe to scroll each panel independently',
+                  app.attr(C_DIM))
+
+    # ── Updater ────────────────────────────────────────────────────────────────
+
+    @app.updater
+    def tick(state):
+        state['tick'] += 1
+        if state['tick'] % 8 == 0:
+            state['bars'] = [
+                (l, min(100, max(0, v + random.uniform(-8, 8))))
+                for l, v in state['bars']
+            ]
+
+    # ── Keybinds ───────────────────────────────────────────────────────────────
+
+    @app.on_key('r')
+    def randomize(state):
+        state['bars'] = [(l, random.uniform(10,90)) for l,_ in state['bars']]
+        state['log'].append(f'[{len(state["log"]):03d}] randomized')
+
+    app.run()

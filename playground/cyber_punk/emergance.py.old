@@ -1,0 +1,97 @@
+import curses
+import time
+import random
+from dataclasses import dataclass
+from typing import Callable
+
+from cyber_tui import CyberTUI
+
+# ── Color pair IDs ─────────────────────────────────────────────────────────────
+C_CYAN    = 1
+C_MAGENTA = 2
+C_GREEN   = 3
+C_YELLOW  = 4
+C_RED     = 5
+C_WHITE   = 6
+C_DIM     = 7
+
+def start():
+    app = CyberTUI(tick_ms=100)
+    app.state.update({
+        'bars':   [(f'CH{i}', random.uniform(10, 90)) for i in range(6)],
+        'log':    [f'[{i:03d}] init ok' for i in range(30)],
+        'scroll': 0,
+        'tick':   0,
+    })
+
+    # ── Background command watcher ─────────────────────────────────────────────
+    # Runs on launch, then every 5 minutes. Output appears in state['ps_out'].
+    # Swap cmd + grep for your actual script.
+    app.watch(
+        cmd       = ['fish', '../../../Software/scripts/network/sshlan.fish'],
+        state_key = 'ssh_scan',
+        grep      = '',       # None to show all output
+        interval  = 300,            # seconds
+    )
+
+    @app.panel(x=0, y=0, w=0.75, h=0.8, title='Main System')
+    def panel_main(scr, box, state):
+        inner = box.inner()
+        app.sparkline(scr, inner.y1, inner.x1, inner.w,
+                      [v for _, v in state['bars']], color=C_CYAN)
+
+        app.putch(scr, inner.y1 + 1, inner.x1 + 1, "Hello", app.attr(C_CYAN))
+
+        ts  = state.get('ssh_scan_ts',  '')
+        err = state.get('ssh_scan_err', '')
+        # Timestamp + error hint on first line
+        meta = f'last run: {ts}' + (f'  ⚠ {err[:40]}' if err else '')
+        app.putch(scr, inner.y1, inner.x1, meta[:inner.w], app.attr(C_DIM))
+        # Output lines
+        for i, line in enumerate(state.get('ssh_scan', [])[:inner.h-1]):
+            app.putch(scr, inner.y1+1+i, inner.x1, line[:inner.w], app.attr(C_GREEN))
+
+
+
+    @app.panel(x=0.75, y=0, w=0.35, h=0.8, title='LOG', title_color=C_MAGENTA)
+    def panel_log(scr, box, state):
+        inner = box.inner()
+        for i, line in enumerate(state['log'][state['scroll']:state['scroll']+inner.h]):
+            app.putch(scr, inner.y1+i, inner.x1, line[:inner.w], app.attr(C_CYAN))
+
+    @app.panel(x=0, y=0.8, w=1.0, h=0.2, title='SYSTEM LOG')
+    def panel_status(scr, box, state):
+        inner = box.inner()
+        app.putch(scr, inner.y1,   inner.x1,
+                  f'tick={state["tick"]}  scroll={state["scroll"]}',
+                  app.attr(C_CYAN))
+        app.putch(scr, inner.y1+1, inner.x1,
+                  '[q]quit  [↑↓]scroll  [r]randomize',
+                  app.attr(C_CYAN))
+
+    @app.updater
+    def tick(state):
+        state['tick'] += 1
+        if state['tick'] % 8 == 0:
+            state['bars'] = [
+                (l, min(100, max(0, v + random.uniform(-8, 8))))
+                for l, v in state['bars']
+            ]
+
+    @app.on_key(curses.KEY_DOWN)
+    def scroll_down(state):
+        state['scroll'] = min(state['scroll']+1, max(0, len(state['log'])-5))
+
+    @app.on_key(curses.KEY_UP)
+    def scroll_up(state):
+        state['scroll'] = max(state['scroll']-1, 0)
+
+    @app.on_key('r')
+    def randomize(state):
+        state['bars'] = [(l, random.uniform(10,90)) for l,_ in state['bars']]
+        state['log'].append(f'[{len(state["log"]):03d}] randomized')
+
+    app.run()
+
+if __name__ == '__main__':
+    start()
