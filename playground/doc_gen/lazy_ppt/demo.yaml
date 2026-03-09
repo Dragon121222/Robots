@@ -1,0 +1,140 @@
+meta:
+  title:  "lazy_pp Demo"
+  author: "Daniel"
+
+theme:
+  background:  "1A1A2E"
+  text:        "E8E8F0"
+  accent:      "16213E"
+  secondary:   "8892B0"
+  font_title:  "Calibri"
+  font_body:   "Calibri"
+  title_size:  36
+  body_size:   18
+
+slides:
+  - layout: title
+    title: "lazy_pp"
+    subtitle: "PowerPoint from YAML, no boilerplate."
+    title_color: "CCD6F6"
+    background: "0A0E1A"
+
+  - layout: section
+    label: "Overview"
+    title: "What it does"
+    subtitle: "Declarative slides. Zero clicks."
+    background: "16213E"
+
+  - layout: content
+    title: "Supported Layouts"
+    bullets:
+      - "title — title + optional subtitle, accent sidebar"
+      - "content — title + free text or bullets"
+      - "two_col — split left/right content areas"
+      - "section — divider slide with big label"
+      - "blank — raw canvas, elements only"
+
+  - layout: content
+    title: "Element Types"
+    elements:
+      - type: bullets
+        x: 0.5
+        y: 1.2
+        w: 4.3
+        h: 4.0
+        size: 16
+        items:
+          - text: "text / textbox"
+          - text: "bullets (nested)"
+          - text: "shape"
+          - text: "table"
+          - text: "chart"
+          - text: "image"
+          - text: "line"
+      - type: shape
+        kind: rectangle
+        x: 5.3
+        y: 1.2
+        w: 4.0
+        h: 3.8
+        fill: "16213E"
+        text: "Compose freely"
+        size: 20
+        bold: true
+        color: "CCD6F6"
+        align: center
+
+  - layout: content
+    title: "Table Example"
+    elements:
+      - type: table
+        x: 0.5
+        y: 1.2
+        w: 9.0
+        h: 3.5
+        header: true
+        header_bg: "0D5FAB"
+        header_fg: "FFFFFF"
+        row_bg: "1E2A40"
+        alt_bg: "16213E"
+        size: 15
+        rows:
+          - ["Key",           "Type",     "Required", "Description"]
+          - ["layout",        "string",   "yes",      "Slide layout name"]
+          - ["title",         "string",   "no",       "Slide heading"]
+          - ["elements",      "list",     "no",       "List of element dicts"]
+          - ["background",    "hex",      "no",       "Per-slide bg override"]
+
+  - layout: content
+    title: "Chart Example"
+    elements:
+      - type: chart
+        chart_type: bar
+        x: 0.5
+        y: 1.2
+        w: 9.0
+        h: 4.0
+        categories: ["Q1", "Q2", "Q3", "Q4"]
+        series:
+          - name: "Revenue"
+            values: [42, 58, 71, 89]
+          - name: "Costs"
+            values: [30, 35, 40, 44]
+
+  - layout: two_col
+    title: "Two-Column Layout"
+    left:
+      elements:
+        - type: bullets
+          y: 1.2
+          h: 4.0
+          size: 16
+          items:
+            - text: "Left column"
+              bold: true
+            - "Bullet A"
+            - "Bullet B"
+            - "Bullet C"
+    right:
+      elements:
+        - type: text
+          y: 1.2
+          h: 4.0
+          text: "Right column — free text, shapes, or images go here."
+          size: 16
+          color: "8892B0"
+          wrap: true
+
+  - layout: blank
+    background: "0A0E1A"
+    elements:
+      - type: text
+        x: 0.5
+        y: 2.0
+        w: 9.0
+        h: 2.0
+        text: "fin."
+        size: 72
+        bold: true
+        color: "CCD6F6"
+        align: center
