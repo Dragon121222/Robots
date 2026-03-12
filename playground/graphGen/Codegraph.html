@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>⬡ CODEGRAPH</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #080810; color: #c8c8e8; font-family: 'Courier New', monospace; overflow: hidden; }
+  #root { width: 100vw; height: 100vh; display: flex; flex-direction: column; }
+
+  #topbar {
+    display: flex; align-items: center; gap: 10px; padding: 6px 14px;
+    background: #0d0d20; border-bottom: 1px solid #1e1e3e;
+    flex-shrink: 0; flex-wrap: wrap; min-height: 40px;
+  }
+  .logo { color: #00c8ff; font-weight: bold; font-size: 13px; letter-spacing: 2px; white-space: nowrap; }
+  .stats { color: #404060; font-size: 11px; white-space: nowrap; }
+
+  #search {
+    background: #12122a; border: 1px solid #2a2a4a; color: #c8c8e8;
+    padding: 3px 8px; font-size: 11px; border-radius: 3px; width: 150px;
+    outline: none; font-family: monospace;
+  }
+
+  .filter-group { display: flex; gap: 4px; flex-wrap: wrap; }
+  .filter-btn {
+    padding: 2px 7px; font-size: 10px; border-radius: 2px; cursor: pointer;
+    transition: all 0.15s; font-family: monospace; border: 1px solid;
+  }
+  .filter-btn.off { background: #0a0a18 !important; color: #404060 !important; border-color: #2a2a3a !important; }
+
+  .btn {
+    background: #1a1a3a; border: 1px solid #3a3a6a; color: #8080c8;
+    padding: 3px 10px; font-size: 11px; border-radius: 3px; cursor: pointer;
+    font-family: monospace; white-space: nowrap;
+  }
+  .btn:hover { border-color: #6060a0; color: #a0a0e0; }
+  .btn-load { background: #1a2a4a; border-color: #3a5a8a; color: #64b4ff; }
+  .btn-cancel { background: #1a1a2a; border-color: #2a2a4a; color: #606080; }
+
+  #main { display: flex; flex: 1; overflow: hidden; position: relative; }
+  #canvas-wrap { flex: 1; position: relative; overflow: hidden; }
+  #graph-svg { display: block; }
+
+  .hint {
+    position: absolute; bottom: 10px; left: 12px;
+    font-size: 10px; color: #2a2a5a; pointer-events: none;
+  }
+
+  #inspector {
+    width: 280px; background: #0d0d20; border-left: 1px solid #1e1e3e;
+    padding: 14px; overflow-y: auto; flex-shrink: 0; font-size: 11px;
+    display: none;
+  }
+  #inspector.visible { display: block; }
+  .insp-title {
+    font-size: 13px; font-weight: bold; margin-bottom: 8px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .insp-close { background: none; border: none; color: #404060; cursor: pointer; font-size: 16px; }
+  .row { display: flex; gap: 6px; margin-bottom: 4px; line-height: 1.4; }
+  .row-label { color: #404070; min-width: 72px; flex-shrink: 0; }
+  .row-val { word-break: break-all; overflow: hidden; text-overflow: ellipsis; }
+  .edge-list { margin-top: 12px; border-top: 1px solid #1e1e3e; padding-top: 8px; }
+  .edge-list-title { color: #404080; font-size: 10px; margin-bottom: 6px; }
+  .edge-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; cursor: pointer; }
+  .edge-type { font-size: 10px; min-width: 80px; flex-shrink: 0; }
+  .edge-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  #import-panel {
+    position: absolute; top: 48px; right: 0;
+    width: 460px; background: #0d0d22; border: 1px solid #2a2a5a;
+    padding: 16px; z-index: 100; border-radius: 0 0 0 6px;
+    display: none;
+  }
+  #import-panel.visible { display: block; }
+  .import-hint { color: #8080c8; font-size: 12px; margin-bottom: 8px; line-height: 1.5; }
+  .import-hint code { color: #50ffcc; }
+  #import-textarea {
+    width: 100%; background: #080818; border: 1px solid #2a2a4a;
+    color: #c8c8e8; font-size: 10px; font-family: monospace;
+    padding: 8px; resize: vertical;
+  }
+  #import-error { color: #ff5050; font-size: 10px; margin-top: 4px; display: none; }
+  .import-btns { display: flex; gap: 8px; margin-top: 8px; }
+
+  /* File drop zone */
+  #drop-overlay {
+    position: fixed; inset: 0; background: rgba(0,200,255,0.08);
+    border: 2px dashed #00c8ff; z-index: 200;
+    display: none; align-items: center; justify-content: center;
+    font-size: 18px; color: #00c8ff; pointer-events: none;
+  }
+  #drop-overlay.visible { display: flex; }
+</style>
+</head>
+<body>
+
+<div id="root">
+  <div id="topbar">
+    <span class="logo">⬡ CODEGRAPH</span>
+    <span class="stats" id="stats">0N / 0E</span>
+    <input id="search" placeholder="search nodes…" type="text" autocomplete="off" spellcheck="false">
+    <div class="filter-group" id="node-filters"></div>
+    <div class="filter-group" id="edge-filters"></div>
+    <button class="btn" id="btn-file" title="Open a .graph.yaml or JSON file">📂 Open File</button>
+    <button class="btn" id="btn-import" style="margin-left:auto">⊕ Paste JSON</button>
+    <input type="file" id="file-input" accept=".yaml,.yml,.json" style="display:none">
+  </div>
+
+  <div id="main">
+    <div id="canvas-wrap">
+      <svg id="graph-svg"></svg>
+      <div class="hint">scroll: zoom · drag: pan · drag node: reposition · click: inspect · drop file anywhere</div>
+    </div>
+    <div id="inspector">
+      <div class="insp-title">
+        <span id="insp-name">—</span>
+        <button class="insp-close" id="insp-close">×</button>
+      </div>
+      <div id="insp-body"></div>
+    </div>
+  </div>
+</div>
+
+<div id="import-panel">
+  <div class="import-hint">
+    Paste the JSON output of <code>src2yaml.py</code>:<br>
+    <code>python3 -c "import yaml,json,sys; print(json.dumps(yaml.safe_load(sys.stdin)))" &lt; file.graph.yaml</code>
+  </div>
+  <textarea id="import-textarea" rows="10" placeholder='{"graph": {"nodes": [...], "edges": [...]}}'></textarea>
+  <div id="import-error"></div>
+  <div class="import-btns">
+    <button class="btn btn-load" id="btn-do-import">Load Graph</button>
+    <button class="btn btn-cancel" id="btn-cancel-import">Cancel</button>
+  </div>
+</div>
+
+<div id="drop-overlay">Drop .graph.yaml or JSON here</div>
+
+<!-- CDN deps: D3 v7 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+
+<script>
+"use strict";
+
+// ── Colour tables ────────────────────────────────────────────
+const NODE_COLORS = {
+  module:    "#00c8ff",
+  namespace: "#50ffcc",
+  class:     "#ff50dc",
+  struct:    "#ff8c3c",
+  function:  "#50c850",
+  method:    "#8cff50",
+  variable:  "#c8a0ff",
+  import:    "#ffdc28",
+  lambda:    "#ff6464",
+};
+const EDGE_COLORS = {
+  contains:     "#3c3c88",
+  calls:        "#50ff50",
+  inherits:     "#ff50dc",
+  imports:      "#ffdc28",
+  references:   "#64b4ff",
+  instantiates: "#ff8c3c",
+  overrides:    "#ff5050",
+  uses_type:    "#b464ff",
+};
+const NODE_RADIUS = {
+  module: 20, namespace: 16, class: 14, struct: 14,
+  function: 10, method: 9, variable: 6, import: 7, lambda: 8,
+};
+function nr(t) { return NODE_RADIUS[t] || 8; }
+function nc(t) { return NODE_COLORS[t] || "#888888"; }
+function ec(t) { return EDGE_COLORS[t] || "#888888"; }
+
+// ── State ────────────────────────────────────────────────────
+let graphData   = { nodes: [], edges: [] };
+let simulation  = null;
+let selectedId  = null;
+let hoveredId   = null;
+let searchTerm  = "";
+let activeNodes = new Set(Object.keys(NODE_COLORS));
+let activeEdges = new Set(Object.keys(EDGE_COLORS));
+
+// ── Filter UI ────────────────────────────────────────────────
+function buildFilters() {
+  const nf = document.getElementById("node-filters");
+  const ef = document.getElementById("edge-filters");
+  nf.innerHTML = "";
+  ef.innerHTML = "";
+
+  Object.entries(NODE_COLORS).forEach(([t, c]) => {
+    const b = document.createElement("button");
+    b.className = "filter-btn";
+    b.textContent = t;
+    b.dataset.type = t;
+    b.dataset.group = "node";
+    b.style.background = c + "22";
+    b.style.color = c;
+    b.style.borderColor = c;
+    b.addEventListener("click", () => {
+      activeNodes.has(t) ? activeNodes.delete(t) : activeNodes.add(t);
+      b.classList.toggle("off", !activeNodes.has(t));
+      rebuildGraph();
+    });
+    nf.appendChild(b);
+  });
+
+  Object.entries(EDGE_COLORS).forEach(([t, c]) => {
+    const b = document.createElement("button");
+    b.className = "filter-btn";
+    b.textContent = "─ " + t;
+    b.dataset.type = t;
+    b.dataset.group = "edge";
+    b.style.background = c + "22";
+    b.style.color = c;
+    b.style.borderColor = c;
+    b.addEventListener("click", () => {
+      activeEdges.has(t) ? activeEdges.delete(t) : activeEdges.add(t);
+      b.classList.toggle("off", !activeEdges.has(t));
+      rebuildGraph();
+    });
+    ef.appendChild(b);
+  });
+}
+
+// ── Graph rendering ──────────────────────────────────────────
+function rebuildGraph() {
+  const wrap = document.getElementById("canvas-wrap");
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+
+  const visNodes = graphData.nodes.filter(n => activeNodes.has(n.type));
+  const visIds = new Set(visNodes.map(n => n.id));
+  const visEdges = graphData.edges.filter(
+    e => activeEdges.has(e.type) && visIds.has(e.source) && visIds.has(e.target)
+  );
+
+  document.getElementById("stats").textContent = `${visNodes.length}N / ${visEdges.length}E`;
+
+  const svgEl = document.getElementById("graph-svg");
+  svgEl.setAttribute("width", W);
+  svgEl.setAttribute("height", H);
+  const svg = d3.select(svgEl);
+  svg.selectAll("*").remove();
+
+  // ── Defs ────
+  const defs = svg.append("defs");
+  const filt = defs.append("filter").attr("id", "glow");
+  filt.append("feGaussianBlur").attr("stdDeviation", "3").attr("result", "blur");
+  const merge = filt.append("feMerge");
+  merge.append("feMergeNode").attr("in", "blur");
+  merge.append("feMergeNode").attr("in", "SourceGraphic");
+
+  Object.entries(EDGE_COLORS).forEach(([type, color]) => {
+    defs.append("marker")
+      .attr("id", `arr-${type}`)
+      .attr("viewBox", "0 -4 8 8")
+      .attr("refX", 8).attr("refY", 0)
+      .attr("markerWidth", 6).attr("markerHeight", 6)
+      .attr("orient", "auto")
+      .append("path").attr("d", "M0,-4L8,0L0,4").attr("fill", color);
+  });
+
+  // ── Background grid ────
+  const gridG = svg.append("g").attr("class", "grid-layer");
+  for (let x = -W; x < W * 3; x += 50)
+    gridG.append("line").attr("x1",x).attr("y1",-H).attr("x2",x).attr("y2",H*3)
+      .attr("stroke","#1a1a2e").attr("stroke-width",1);
+  for (let y = -H; y < H * 3; y += 50)
+    gridG.append("line").attr("x1",-W).attr("y1",y).attr("x2",W*3).attr("y2",y)
+      .attr("stroke","#1a1a2e").attr("stroke-width",1);
+
+  const g = svg.append("g");
+
+  // ── Zoom/pan ────
+  const zoom = d3.zoom().scaleExtent([0.05, 6]).on("zoom", ev => {
+    g.attr("transform", ev.transform);
+    gridG.attr("transform", ev.transform);
+  });
+  svg.call(zoom);
+  svg.on("click.desel", ev => {
+    if (ev.target === svgEl) { selectedId = null; updateInspector(); updateHighlight(); }
+  });
+
+  // ── Simulation nodes/edges ────
+  const simNodes = visNodes.map(n => ({
+    ...n,
+    x: W/2 + (Math.random()-0.5)*W*0.5,
+    y: H/2 + (Math.random()-0.5)*H*0.5,
+  }));
+  const nodeById = {};
+  simNodes.forEach(n => nodeById[n.id] = n);
+
+  const simEdges = visEdges.map(e => ({ ...e }));
+
+  // ── Edge paths ────
+  const edgeG = g.append("g").attr("class", "edges");
+  const edgeSel = edgeG.selectAll("path")
+    .data(simEdges, d => d.id)
+    .join("path")
+    .attr("stroke", d => ec(d.type))
+    .attr("stroke-width", d => d.type==="inherits" ? 2.5 : d.type==="calls" ? 2 : 1.2)
+    .attr("fill", "none")
+    .attr("marker-end", d => `url(#arr-${d.type})`)
+    .attr("opacity", 0.7);
+
+  // ── Node groups ────
+  const nodeG = g.append("g").attr("class", "nodes");
+  const nodeSel = nodeG.selectAll("g")
+    .data(simNodes, d => d.id)
+    .join("g")
+    .attr("class", "node")
+    .style("cursor", "pointer")
+    .call(d3.drag()
+      .on("start", (ev, d) => { if (!ev.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+      .on("drag",  (ev, d) => { d.fx=ev.x; d.fy=ev.y; })
+      .on("end",   (ev, d) => { if (!ev.active) sim.alphaTarget(0); d.fx=null; d.fy=null; })
+    )
+    .on("click", (ev, d) => {
+      ev.stopPropagation();
+      selectedId = selectedId === d.id ? null : d.id;
+      updateInspector(d);
+      updateHighlight();
+    })
+    .on("mouseenter", (_, d) => { hoveredId = d.id; updateHighlight(); })
+    .on("mouseleave", ()    => { hoveredId = null;  updateHighlight(); });
+
+  nodeSel.append("circle").attr("r", d=>nr(d.type)+6)
+    .attr("fill", d=>nc(d.type)).attr("opacity", 0.15).attr("filter","url(#glow)");
+  nodeSel.append("circle").attr("r", d=>nr(d.type))
+    .attr("fill", d=>nc(d.type)).attr("opacity", 0.9);
+  nodeSel.append("circle").attr("r", d=>nr(d.type)-3)
+    .attr("fill","#0a0a18").attr("opacity", 0.85);
+  nodeSel.append("circle").attr("r", d=>Math.max(2,nr(d.type)/3))
+    .attr("fill", d=>nc(d.type)).attr("opacity", 0.8);
+  nodeSel.append("text")
+    .attr("dy", d=>nr(d.type)+13).attr("text-anchor","middle")
+    .attr("font-family","monospace")
+    .attr("font-size", d=>["module","class","namespace"].includes(d.type)?11:9)
+    .attr("fill", d=>nc(d.type)).attr("opacity",0.85).attr("pointer-events","none")
+    .text(d => d.name.length>18 ? d.name.slice(0,16)+"…" : d.name);
+
+  // ── Force simulation ────
+  const edgeLens = { contains:70, calls:140, inherits:120, imports:90 };
+  const sim = d3.forceSimulation(simNodes)
+    .force("link", d3.forceLink(simEdges).id(d=>d.id)
+      .distance(d=>edgeLens[d.type]||110).strength(d=>d.type==="contains"?0.7:0.3))
+    .force("charge", d3.forceManyBody().strength(-280).distanceMax(400))
+    .force("center", d3.forceCenter(W/2, H/2).strength(0.05))
+    .force("collide", d3.forceCollide(d=>nr(d.type)+14))
+    .alphaDecay(0.015)
+    .on("tick", () => {
+      edgeSel.attr("d", d => {
+        const s = d.source, t = d.target;
+        if (!s||!t) return "";
+        const dx=t.x-s.x, dy=t.y-s.y, dist=Math.sqrt(dx*dx+dy*dy)||1;
+        const sr=nr(s.type), tr=nr(t.type)+10;
+        const mx=(s.x+t.x)/2 - dy*0.15, my=(s.y+t.y)/2 + dx*0.15;
+        return `M${s.x+dx/dist*sr},${s.y+dy/dist*sr} Q${mx},${my} ${t.x-dx/dist*tr},${t.y-dy/dist*tr}`;
+      });
+      nodeSel.attr("transform", d=>`translate(${d.x},${d.y})`);
+    });
+
+  simulation = sim;
+
+  // Expose for highlight
+  window._simNodes = simNodes;
+  window._simEdges = simEdges;
+  window._nodeSel  = nodeSel;
+  window._edgeSel  = edgeSel;
+  window._visEdges = visEdges;
+
+  updateHighlight();
+  if (selectedId) updateInspector(simNodes.find(n=>n.id===selectedId));
+}
+
+// ── Highlight ────────────────────────────────────────────────
+function updateHighlight() {
+  const nodeSel = window._nodeSel;
+  const edgeSel = window._edgeSel;
+  const visEdges = window._visEdges || [];
+  if (!nodeSel) return;
+
+  const hlNodes = new Set();
+  const hlEdges = new Set();
+  const active = selectedId || hoveredId;
+
+  if (active) {
+    hlNodes.add(active);
+    visEdges.forEach(e => {
+      const sid = typeof e.source==="object" ? e.source.id : e.source;
+      const tid = typeof e.target==="object" ? e.target.id : e.target;
+      if (sid===active || tid===active) {
+        hlNodes.add(sid); hlNodes.add(tid); hlEdges.add(e.id);
+      }
+    });
+  }
+
+  const q = searchTerm.length > 1 ? searchTerm.toLowerCase() : null;
+  const srchIds = new Set();
+  if (q) {
+    (window._simNodes||[]).forEach(n => {
+      if (n.name.toLowerCase().includes(q) || (n.qualified_name||"").toLowerCase().includes(q))
+        srchIds.add(n.id);
+    });
+  }
+
+  nodeSel.attr("opacity", d => {
+    const inHL = !active || hlNodes.has(d.id);
+    const inSr = !q || srchIds.has(d.id);
+    return (inHL ? 1 : 0.1) * (inSr ? 1 : 0.15);
+  });
+
+  edgeSel.attr("opacity", d => {
+    const inHL = !active || hlEdges.has(d.id);
+    return inHL ? 0.85 : 0.05;
+  });
+}
+
+// ── Inspector ────────────────────────────────────────────────
+function updateInspector(node) {
+  const panel = document.getElementById("inspector");
+  const nameEl = document.getElementById("insp-name");
+  const body = document.getElementById("insp-body");
+
+  if (!node || !selectedId) {
+    panel.classList.remove("visible");
+    return;
+  }
+
+  panel.classList.add("visible");
+  nameEl.textContent = "◈ " + node.name;
+  nameEl.style.color = nc(node.type);
+
+  const rows = [
+    ["type",      node.type,           nc(node.type)],
+    ["qualified", node.qualified_name, null],
+    ["language",  node.language,       null],
+  ];
+  if (node.loc) {
+    rows.push(["file",  node.loc.file,  null]);
+    rows.push(["lines", `${node.loc.line_start}–${node.loc.line_end}`, null]);
+  }
+  if (node.metadata) {
+    Object.entries(node.metadata).forEach(([k, v]) => {
+      if (v === null || v === undefined) return;
+      let display;
+      if (Array.isArray(v)) {
+        if (v.length === 0) display = "[]";
+        else display = v.map(p => typeof p==="object" ? `${p.name}${p.type?":"+p.type:""}` : String(p)).join(", ");
+      } else display = String(v);
+      if (!display || display==="false") return;
+      rows.push([k, display, null]);
+    });
+  }
+
+  body.innerHTML = "";
+  rows.forEach(([lbl, val, color]) => {
+    const div = document.createElement("div");
+    div.className = "row";
+    div.innerHTML = `<span class="row-label">${lbl}</span><span class="row-val" style="color:${color||"#9090c0"}">${escHtml(val||"")}</span>`;
+    body.appendChild(div);
+  });
+
+  // Connected edges
+  const visEdges = window._visEdges || [];
+  const connEdges = visEdges.filter(e => {
+    const sid = typeof e.source==="object" ? e.source.id : e.source;
+    const tid = typeof e.target==="object" ? e.target.id : e.target;
+    return sid===node.id || tid===node.id;
+  });
+  if (connEdges.length) {
+    const el = document.createElement("div");
+    el.className = "edge-list";
+    el.innerHTML = `<div class="edge-list-title">EDGES (${connEdges.length})</div>`;
+    connEdges.forEach(e => {
+      const sid = typeof e.source==="object" ? e.source.id : e.source;
+      const tid = typeof e.target==="object" ? e.target.id : e.target;
+      const isOut = sid === node.id;
+      const otherId = isOut ? tid : sid;
+      const other = graphData.nodes.find(n=>n.id===otherId);
+      const row = document.createElement("div");
+      row.className = "edge-row";
+      row.innerHTML = `
+        <span class="edge-type" style="color:${ec(e.type)}">${isOut?"→":"←"} ${e.type}</span>
+        <span class="edge-name" style="color:${nc(other?.type)}">${escHtml(other?.name||otherId.slice(0,14))}</span>
+      `;
+      row.addEventListener("click", () => {
+        const target = graphData.nodes.find(n=>n.id===otherId);
+        if (target) { selectedId = target.id; updateInspector(target); updateHighlight(); }
+      });
+      el.appendChild(row);
+    });
+    body.appendChild(el);
+  }
+}
+
+// ── YAML/JSON parse ──────────────────────────────────────────
+function parseInput(text) {
+  // Try JSON first
+  try {
+    const j = JSON.parse(text);
+    if (j.graph) return { nodes: j.graph.nodes||[], edges: j.graph.edges||[] };
+    if (j.nodes) return j;
+  } catch {}
+  // Very minimal YAML: try to find a JSON-embedded nodes/edges block
+  // (the output of src2yaml is YAML with flow-style arrays — valid JSON arrays)
+  const nm = text.match(/nodes:\s*(\[[\s\S]*?\])\nedges:/);
+  const em = text.match(/edges:\s*(\[[\s\S]*\])\s*$/);
+  try {
+    const nodes = nm ? JSON.parse(nm[1]) : [];
+    const edges = em ? JSON.parse(em[1]) : [];
+    if (nodes.length || edges.length) return { nodes, edges };
+  } catch {}
+  return null;
+}
+
+// ── Load from file ───────────────────────────────────────────
+function loadFromText(text, filename) {
+  const parsed = parseInput(text);
+  if (!parsed) { alert(`Could not parse ${filename}.\nExpected JSON from src2yaml or a graph:{nodes:[],edges:[]} structure.`); return; }
+  graphData = parsed;
+  selectedId = null;
+  document.getElementById("inspector").classList.remove("visible");
+  rebuildGraph();
+}
+
+document.getElementById("file-input").addEventListener("change", ev => {
+  const file = ev.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => loadFromText(e.target.result, file.name);
+  reader.readAsText(file);
+  ev.target.value = "";
+});
+
+document.getElementById("btn-file").addEventListener("click", () => {
+  document.getElementById("file-input").click();
+});
+
+// ── Drag & drop ──────────────────────────────────────────────
+const dropOverlay = document.getElementById("drop-overlay");
+document.addEventListener("dragover", ev => { ev.preventDefault(); dropOverlay.classList.add("visible"); });
+document.addEventListener("dragleave", ev => { if (!ev.relatedTarget) dropOverlay.classList.remove("visible"); });
+document.addEventListener("drop", ev => {
+  ev.preventDefault();
+  dropOverlay.classList.remove("visible");
+  const file = ev.dataTransfer.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => loadFromText(e.target.result, file.name);
+  reader.readAsText(file);
+});
+
+// ── Import panel ─────────────────────────────────────────────
+document.getElementById("btn-import").addEventListener("click", () => {
+  document.getElementById("import-panel").classList.toggle("visible");
+});
+document.getElementById("btn-cancel-import").addEventListener("click", () => {
+  document.getElementById("import-panel").classList.remove("visible");
+  document.getElementById("import-error").style.display = "none";
+});
+document.getElementById("btn-do-import").addEventListener("click", () => {
+  const text = document.getElementById("import-textarea").value;
+  const parsed = parseInput(text);
+  const errEl = document.getElementById("import-error");
+  if (!parsed) {
+    errEl.textContent = "Could not parse. Paste JSON from src2yaml or {graph:{nodes:[],edges:[]}}.";
+    errEl.style.display = "block";
+    return;
+  }
+  errEl.style.display = "none";
+  graphData = parsed;
+  selectedId = null;
+  document.getElementById("inspector").classList.remove("visible");
+  document.getElementById("import-panel").classList.remove("visible");
+  document.getElementById("import-textarea").value = "";
+  rebuildGraph();
+});
+
+// ── Search ───────────────────────────────────────────────────
+document.getElementById("search").addEventListener("input", ev => {
+  searchTerm = ev.target.value;
+  updateHighlight();
+});
+
+// ── Inspector close ──────────────────────────────────────────
+document.getElementById("insp-close").addEventListener("click", () => {
+  selectedId = null;
+  document.getElementById("inspector").classList.remove("visible");
+  updateHighlight();
+});
+
+// ── Resize ───────────────────────────────────────────────────
+const resizeObs = new ResizeObserver(() => rebuildGraph());
+resizeObs.observe(document.getElementById("canvas-wrap"));
+
+// ── Utils ────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// ── Init ─────────────────────────────────────────────────────
+buildFilters();
+// Load sample data
+fetch("").catch(()=>{}); // suppress console noise
+// Inline sample — robot.py graph
+graphData = {"nodes":[{"id":"robot_py_3e0ed9","type":"module","name":"robot","qualified_name":"robot","language":"python","loc":{"file":"robot.py","line_start":1,"line_end":0,"col_start":0},"metadata":{}},{"id":"asyncio_7778fb","type":"import","name":"asyncio","qualified_name":"asyncio","language":"python","loc":{"file":"robot.py","line_start":3,"line_end":3,"col_start":0},"metadata":{"module":"asyncio"}},{"id":"numpy_27a793","type":"import","name":"np","qualified_name":"numpy","language":"python","loc":{"file":"robot.py","line_start":4,"line_end":4,"col_start":0},"metadata":{"module":"numpy"}},{"id":"pathlib_Path_cbfd99","type":"import","name":"Path","qualified_name":"pathlib.Path","language":"python","loc":{"file":"robot.py","line_start":7,"line_end":7,"col_start":0},"metadata":{"module":"pathlib","symbol":"Path"}},{"id":"robot_Pose_fc358c","type":"class","name":"Pose","qualified_name":"robot.Pose","language":"python","loc":{"file":"robot.py","line_start":11,"line_end":14,"col_start":0},"metadata":{"bases":[],"decorators":["dataclass"]}},{"id":"robot_Pose_x_774446","type":"variable","name":"x","qualified_name":"robot.Pose.x","language":"python","loc":{"file":"robot.py","line_start":12,"line_end":12,"col_start":4},"metadata":{"type_annotation":"float"}},{"id":"robot_Pose_y_62fdf0","type":"variable","name":"y","qualified_name":"robot.Pose.y","language":"python","loc":{"file":"robot.py","line_start":13,"line_end":13,"col_start":4},"metadata":{"type_annotation":"float"}},{"id":"robot_Pose_theta_a33f1c","type":"variable","name":"theta","qualified_name":"robot.Pose.theta","language":"python","loc":{"file":"robot.py","line_start":14,"line_end":14,"col_start":4},"metadata":{"type_annotation":"float"}},{"id":"robot_Sensor_792041","type":"class","name":"Sensor","qualified_name":"robot.Sensor","language":"python","loc":{"file":"robot.py","line_start":17,"line_end":28,"col_start":0},"metadata":{"bases":[],"decorators":[]}},{"id":"robot_Sensor___init___9f9d40","type":"method","name":"__init__","qualified_name":"robot.Sensor.__init__","language":"python","loc":{"file":"robot.py","line_start":19,"line_end":22,"col_start":4},"metadata":{"params":[{"name":"self"},{"name":"name","type":"str"},{"name":"rate_hz","type":"float"}],"return_type":null,"async":false,"decorators":[]}},{"id":"robot_Sensor_read_bf0c29","type":"method","name":"read","qualified_name":"robot.Sensor.read","language":"python","loc":{"file":"robot.py","line_start":24,"line_end":25,"col_start":4},"metadata":{"params":[{"name":"self"}],"return_type":"Optional[np.ndarray]","async":false,"decorators":[]}},{"id":"robot_Sensor_calibrate_cccaac","type":"method","name":"calibrate","qualified_name":"robot.Sensor.calibrate","language":"python","loc":{"file":"robot.py","line_start":27,"line_end":28,"col_start":4},"metadata":{"params":[{"name":"self"}],"return_type":null,"async":false,"decorators":[]}},{"id":"robot_Kinect_90b3cc","type":"class","name":"Kinect","qualified_name":"robot.Kinect","language":"python","loc":{"file":"robot.py","line_start":31,"line_end":51,"col_start":0},"metadata":{"bases":["Sensor"],"decorators":[]}},{"id":"robot_Kinect___init___97f1aa","type":"method","name":"__init__","qualified_name":"robot.Kinect.__init__","language":"python","loc":{"file":"robot.py","line_start":36,"line_end":40,"col_start":4},"metadata":{"params":[{"name":"self"},{"name":"device_id","type":"int"}],"return_type":null,"async":false,"decorators":[]}},{"id":"robot_Kinect_read_949966","type":"method","name":"read","qualified_name":"robot.Kinect.read","language":"python","loc":{"file":"robot.py","line_start":42,"line_end":43,"col_start":4},"metadata":{"params":[{"name":"self"}],"return_type":"Optional[np.ndarray]","async":false,"decorators":[]}},{"id":"robot_Kinect_get_pointcloud_ced8a3","type":"method","name":"get_pointcloud","qualified_name":"robot.Kinect.get_pointcloud","language":"python","loc":{"file":"robot.py","line_start":48,"line_end":51,"col_start":4},"metadata":{"params":[{"name":"self"}],"return_type":"np.ndarray","async":false,"decorators":[]}},{"id":"robot_WheelLegActuator_c15691","type":"class","name":"WheelLegActuator","qualified_name":"robot.WheelLegActuator","language":"python","loc":{"file":"robot.py","line_start":54,"line_end":71,"col_start":0},"metadata":{"bases":[],"decorators":[]}},{"id":"robot_WheelLegActuator___init___79ce68","type":"method","name":"__init__","qualified_name":"robot.WheelLegActuator.__init__","language":"python","loc":{"file":"robot.py","line_start":58,"line_end":61,"col_start":4},"metadata":{"params":[{"name":"self"},{"name":"joint_id","type":"int"}],"return_type":null,"async":false,"decorators":[]}},{"id":"robot_WheelLegActuator_set_torque_cf05b7","type":"method","name":"set_torque","qualified_name":"robot.WheelLegActuator.set_torque","language":"python","loc":{"file":"robot.py","line_start":63,"line_end":65,"col_start":4},"metadata":{"params":[{"name":"self"},{"name":"torque_nm","type":"float"}],"return_type":null,"async":false,"decorators":[]}},{"id":"robot_WheelLegActuator_step_5943e5","type":"method","name":"step","qualified_name":"robot.WheelLegActuator.step","language":"python","loc":{"file":"robot.py","line_start":70,"line_end":71,"col_start":4},"metadata":{"params":[{"name":"self"},{"name":"dt","type":"float"}],"return_type":null,"async":false,"decorators":[]}},{"id":"robot_LocomotionController_9d6ac0","type":"class","name":"LocomotionController","qualified_name":"robot.LocomotionController","language":"python","loc":{"file":"robot.py","line_start":74,"line_end":100,"col_start":0},"metadata":{"bases":[],"decorators":[]}},{"id":"robot_LocomotionController___init___2d0ff7","type":"method","name":"__init__","qualified_name":"robot.LocomotionController.__init__","language":"python","loc":{"file":"robot.py","line_start":76,"line_end":79,"col_start":4},"metadata":{"params":[{"name":"self"},{"name":"num_legs","type":"int"}],"return_type":null,"async":false,"decorators":[]}},{"id":"robot_LocomotionController_walk_946007","type":"method","name":"walk","qualified_name":"robot.LocomotionController.walk","language":"python","loc":{"file":"robot.py","line_start":81,"line_end":84,"col_start":4},"metadata":{"params":[{"name":"self"},{"name":"vx","type":"float"},{"name":"vy","type":"float"},{"name":"omega","type":"float"}],"return_type":null,"async":false,"decorators":[]}},{"id":"robot_LocomotionController_update_cbe0b1","type":"method","name":"update","qualified_name":"robot.LocomotionController.update","language":"python","loc":{"file":"robot.py","line_start":89,"line_end":93,"col_start":4},"metadata":{"params":[{"name":"self"},{"name":"dt","type":"float"}],"return_type":null,"async":false,"decorators":[]}},{"id":"robot_YOLODetector_9d4023","type":"class","name":"YOLODetector","qualified_name":"robot.YOLODetector","language":"python","loc":{"file":"robot.py","line_start":103,"line_end":128,"col_start":0},"metadata":{"bases":[],"decorators":[]}},{"id":"robot_YOLODetector___init___ba1eb7","type":"method","name":"__init__","qualified_name":"robot.YOLODetector.__init__","language":"python","loc":{"file":"robot.py","line_start":105,"line_end":108,"col_start":4},"metadata":{"params":[{"name":"self"},{"name":"model_path","type":"Path"},{"name":"input_size","type":"tuple"}],"return_type":null,"async":false,"decorators":[]}},{"id":"robot_YOLODetector_detect_f44872","type":"method","name":"detect","qualified_name":"robot.YOLODetector.detect","language":"python","loc":{"file":"robot.py","line_start":113,"line_end":117,"col_start":4},"metadata":{"params":[{"name":"self"},{"name":"frame","type":"np.ndarray"}],"return_type":"List[dict]","async":false,"decorators":[]}},{"id":"robot_YOLODetector__run_inference_9eba26","type":"method","name":"_run_inference","qualified_name":"robot.YOLODetector._run_inference","language":"python","loc":{"file":"robot.py","line_start":119,"line_end":120,"col_start":4},"metadata":{"params":[{"name":"self"},{"name":"frame","type":"np.ndarray"}],"return_type":"np.ndarray","async":false,"decorators":[]}},{"id":"robot_RobotBrain_893384","type":"class","name":"RobotBrain","qualified_name":"robot.RobotBrain","language":"python","loc":{"file":"robot.py","line_start":131,"line_end":161,"col_start":0},"metadata":{"bases":[],"decorators":[]}},{"id":"robot_RobotBrain___init___5f1b6b","type":"method","name":"__init__","qualified_name":"robot.RobotBrain.__init__","language":"python","loc":{"file":"robot.py","line_start":133,"line_end":138,"col_start":4},"metadata":{"params":[{"name":"self"},{"name":"config_path","type":"Path"}],"return_type":null,"async":false,"decorators":[]}},{"id":"robot_RobotBrain_run_20beec","type":"method","name":"run","qualified_name":"robot.RobotBrain.run","language":"python","loc":{"file":"robot.py","line_start":140,"line_end":146,"col_start":4},"metadata":{"params":[{"name":"self"}],"return_type":null,"async":true,"decorators":[]}},{"id":"robot_RobotBrain__tick_f2f344","type":"method","name":"_tick","qualified_name":"robot.RobotBrain._tick","language":"python","loc":{"file":"robot.py","line_start":148,"line_end":153,"col_start":4},"metadata":{"params":[{"name":"self"}],"return_type":null,"async":true,"decorators":[]}},{"id":"robot_RobotBrain__react_c315da","type":"method","name":"_react","qualified_name":"robot.RobotBrain._react","language":"python","loc":{"file":"robot.py","line_start":155,"line_end":158,"col_start":4},"metadata":{"params":[{"name":"self"},{"name":"detections","type":"List[dict]"}],"return_type":null,"async":false,"decorators":[]}},{"id":"robot_RobotBrain_stop_51f993","type":"method","name":"stop","qualified_name":"robot.RobotBrain.stop","language":"python","loc":{"file":"robot.py","line_start":160,"line_end":161,"col_start":4},"metadata":{"params":[{"name":"self"}],"return_type":null,"async":false,"decorators":[]}},{"id":"robot_main_4009b8","type":"function","name":"main","qualified_name":"robot.main","language":"python","loc":{"file":"robot.py","line_start":164,"line_end":166,"col_start":0},"metadata":{"params":[],"return_type":null,"async":false,"decorators":[]}}],"edges":[{"id":"e_robot_py_asyncio__imports","source":"robot_py_3e0ed9","target":"asyncio_7778fb","type":"imports","metadata":{}},{"id":"e_robot_py_numpy_27_imports","source":"robot_py_3e0ed9","target":"numpy_27a793","type":"imports","metadata":{}},{"id":"e_robot_py_pathlib__imports","source":"robot_py_3e0ed9","target":"pathlib_Path_cbfd99","type":"imports","metadata":{}},{"id":"e_robot_py_robot_Po_contains","source":"robot_py_3e0ed9","target":"robot_Pose_fc358c","type":"contains","metadata":{}},{"id":"e_robot_Po_x","source":"robot_Pose_fc358c","target":"robot_Pose_x_774446","type":"contains","metadata":{}},{"id":"e_robot_Po_y","source":"robot_Pose_fc358c","target":"robot_Pose_y_62fdf0","type":"contains","metadata":{}},{"id":"e_robot_Po_theta","source":"robot_Pose_fc358c","target":"robot_Pose_theta_a33f1c","type":"contains","metadata":{}},{"id":"e_robot_py_robot_Se_contains","source":"robot_py_3e0ed9","target":"robot_Sensor_792041","type":"contains","metadata":{}},{"id":"e_Se_init","source":"robot_Sensor_792041","target":"robot_Sensor___init___9f9d40","type":"contains","metadata":{}},{"id":"e_Se_read","source":"robot_Sensor_792041","target":"robot_Sensor_read_bf0c29","type":"contains","metadata":{}},{"id":"e_Se_cal","source":"robot_Sensor_792041","target":"robot_Sensor_calibrate_cccaac","type":"contains","metadata":{}},{"id":"e_robot_py_robot_Ki_contains","source":"robot_py_3e0ed9","target":"robot_Kinect_90b3cc","type":"contains","metadata":{}},{"id":"e_Ki_inh","source":"robot_Kinect_90b3cc","target":"robot_Sensor_792041","type":"inherits","metadata":{}},{"id":"e_Ki_init","source":"robot_Kinect_90b3cc","target":"robot_Kinect___init___97f1aa","type":"contains","metadata":{}},{"id":"e_Ki_read","source":"robot_Kinect_90b3cc","target":"robot_Kinect_read_949966","type":"contains","metadata":{}},{"id":"e_Ki_pc","source":"robot_Kinect_90b3cc","target":"robot_Kinect_get_pointcloud_ced8a3","type":"contains","metadata":{}},{"id":"e_robot_py_robot_Wh_contains","source":"robot_py_3e0ed9","target":"robot_WheelLegActuator_c15691","type":"contains","metadata":{}},{"id":"e_Wh_init","source":"robot_WheelLegActuator_c15691","target":"robot_WheelLegActuator___init___79ce68","type":"contains","metadata":{}},{"id":"e_Wh_st","source":"robot_WheelLegActuator_c15691","target":"robot_WheelLegActuator_set_torque_cf05b7","type":"contains","metadata":{}},{"id":"e_Wh_step","source":"robot_WheelLegActuator_c15691","target":"robot_WheelLegActuator_step_5943e5","type":"contains","metadata":{}},{"id":"e_robot_py_robot_Lo_contains","source":"robot_py_3e0ed9","target":"robot_LocomotionController_9d6ac0","type":"contains","metadata":{}},{"id":"e_Lo_init","source":"robot_LocomotionController_9d6ac0","target":"robot_LocomotionController___init___2d0ff7","type":"contains","metadata":{}},{"id":"e_Lo_walk","source":"robot_LocomotionController_9d6ac0","target":"robot_LocomotionController_walk_946007","type":"contains","metadata":{}},{"id":"e_Lo_upd","source":"robot_LocomotionController_9d6ac0","target":"robot_LocomotionController_update_cbe0b1","type":"contains","metadata":{}},{"id":"e_robot_py_robot_YO_contains","source":"robot_py_3e0ed9","target":"robot_YOLODetector_9d4023","type":"contains","metadata":{}},{"id":"e_YO_init","source":"robot_YOLODetector_9d4023","target":"robot_YOLODetector___init___ba1eb7","type":"contains","metadata":{}},{"id":"e_YO_det","source":"robot_YOLODetector_9d4023","target":"robot_YOLODetector_detect_f44872","type":"contains","metadata":{}},{"id":"e_YO_inf","source":"robot_YOLODetector_9d4023","target":"robot_YOLODetector__run_inference_9eba26","type":"contains","metadata":{}},{"id":"e_robot_py_robot_Ro_contains","source":"robot_py_3e0ed9","target":"robot_RobotBrain_893384","type":"contains","metadata":{}},{"id":"e_Ro_init","source":"robot_RobotBrain_893384","target":"robot_RobotBrain___init___5f1b6b","type":"contains","metadata":{}},{"id":"e_Ro_run","source":"robot_RobotBrain_893384","target":"robot_RobotBrain_run_20beec","type":"contains","metadata":{}},{"id":"e_Ro_tick","source":"robot_RobotBrain_893384","target":"robot_RobotBrain__tick_f2f344","type":"contains","metadata":{}},{"id":"e_Ro_react","source":"robot_RobotBrain_893384","target":"robot_RobotBrain__react_c315da","type":"contains","metadata":{}},{"id":"e_Ro_stop","source":"robot_RobotBrain_893384","target":"robot_RobotBrain_stop_51f993","type":"contains","metadata":{}},{"id":"e_robot_py_main","source":"robot_py_3e0ed9","target":"robot_main_4009b8","type":"contains","metadata":{}},{"id":"e_react_walk","source":"robot_RobotBrain__react_c315da","target":"robot_LocomotionController_walk_946007","type":"calls","metadata":{}},{"id":"e_tick_det","source":"robot_RobotBrain__tick_f2f344","target":"robot_YOLODetector_detect_f44872","type":"calls","metadata":{}},{"id":"e_det_inf","source":"robot_YOLODetector_detect_f44872","target":"robot_YOLODetector__run_inference_9eba26","type":"calls","metadata":{}},{"id":"e_set_tor_apply","source":"robot_WheelLegActuator_set_torque_cf05b7","target":"robot_WheelLegActuator_step_5943e5","type":"calls","metadata":{}}]};
+rebuildGraph();
+</script>
+</body>
+</html>
